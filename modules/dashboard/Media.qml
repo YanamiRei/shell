@@ -275,7 +275,10 @@ Item {
 
             disabled: !Players.list.length
             active: menuItems.find(m => m.modelData === Players.active) ?? menuItems[0] ?? null
-            menu.onItemSelected: item => Players.manualActive = item.modelData
+            menu.onItemSelected: item => {
+                Players.manualActive = item.modelData
+                loadLyrics()
+            }
 
             menuItems: playerList.instances
             fallbackIcon: "music_off"
