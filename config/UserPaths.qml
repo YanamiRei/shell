@@ -6,4 +6,5 @@ JsonObject {
     property string lyricsDir: `${Paths.home}/Music/lyrics`
     property string sessionGif: "root:/assets/kurukuru.gif"
     property string mediaGif: "root:/assets/bongocat.gif"
+    property string notifPic: "root:/assets/dino.png"
 }
