@@ -1,4 +1,4 @@
-pragma ComponentBehavior: Bound
+//pragma ComponentBehavior: Bound
 
 import qs.components
 import qs.components.effects
@@ -8,11 +8,13 @@ import qs.utils
 import qs.config
 import Caelestia.Services
 import Quickshell
+import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.Mpris
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
+import "../../utils/scripts/lrcparser.js" as Lrc
 
 Item {
     id: root
@@ -40,18 +42,112 @@ Item {
     implicitWidth: cover.implicitWidth + Config.dashboard.sizes.mediaVisualiserSize * 2 + details.implicitWidth + details.anchors.leftMargin + bongocat.implicitWidth + bongocat.anchors.leftMargin * 2 + Appearance.padding.large * 2
     implicitHeight: Math.max(cover.implicitHeight + Config.dashboard.sizes.mediaVisualiserSize * 2, details.implicitHeight, bongocat.implicitHeight) + Appearance.padding.large * 2
 
+    FileView {
+        id: lrcFile
+        path: ""
+        watchChanges: false
+        onLoaded: {
+
+            fileLoaded = true
+            let content = text()
+            let parsed = Lrc.parseLrc(content)
+            lyricsModel.clear()
+
+            for (let line of parsed) {
+                lyricsModel.append({
+                    time: line.time,
+                    text: line.text
+                })
+            }
+        }
+    }
+
+    property var player: Players.active ?? null
+
+    ListModel {
+        id: lyricsModel
+    }
+
+    property int currentIndex: -1
+    property string lyricsDir: Paths.absolutePath(Config.paths.lyricsDir)
+
+    Component.onCompleted: loadLyrics()
+
+    function getLrcFilename() {
+        if (!player || !player.metadata)
+            return ""
+
+            let artist = player.metadata["xesam:artist"]
+            let title  = player.metadata["xesam:title"]
+
+            if (artist instanceof Array)
+                artist = artist[0]
+
+                if (!artist || !title)
+                    return ""
+
+                    return artist + " - " + title + ".lrc"
+    }
+
+    property bool fileLoaded: false
+
+    function loadLyrics() {
+        let file = getLrcFilename()
+
+        fileLoaded = false
+
+        if (!file) {
+            lyricsModel.clear()
+            lrcFile.path = ""
+            return
+        }
+
+        let fullPath = lyricsDir + "/" + file
+        lrcFile.path = fullPath
+
+        Qt.callLater(() => {
+            if (!fileLoaded) {
+                lyricsModel.clear()
+            }
+        })
+
+    }
+
+    Connections {
+        target: player
+
+        function onMetadataChanged() {
+            loadLyrics()
+        }
+        function onTrackChanged() {
+            loadLyrics()
+        }
+    }
+
     Behavior on playerProgress {
         Anim {
             duration: Appearance.anim.durations.large
         }
     }
 
+    function lyricsArray() {
+        let arr = []
+        for (let i = 0; i < lyricsModel.count; i++) {
+            arr.push(lyricsModel.get(i))
+        }
+        return arr
+    }
+
+
     Timer {
         running: Players.active?.isPlaying ?? false
         interval: Config.dashboard.mediaUpdateInterval
-        triggeredOnStart: true
         repeat: true
-        onTriggered: Players.active?.positionChanged()
+        onTriggered: {
+            if (!player || !lyricsModel.count) return
+            root.currentIndex = Lrc.getCurrentLine(lyricsArray(), player.position)
+            player.positionChanged();
+        }
     }
 
     ServiceRef {
@@ -119,6 +215,7 @@ Item {
         id: cover
 
         anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: -(playerChanger.height)
         anchors.left: parent.left
         anchors.leftMargin: Appearance.padding.large + Config.dashboard.sizes.mediaVisualiserSize
 
@@ -147,6 +244,71 @@ Item {
             fillMode: Image.PreserveAspectCrop
             sourceSize.width: width
             sourceSize.height: height
+        }
+    }
+
+    RowLayout {
+        id: playerChanger
+
+        anchors.bottom: visualiser.bottom
+        anchors.horizontalCenter: visualiser.horizontalCenter
+        //anchors.verticalCenter:slider.verticalCenter   //wish this worked!
+        anchors.bottomMargin: -(playerChanger.height)
+        spacing: Appearance.spacing.small
+
+        PlayerControl {
+            type: IconButton.Text
+            icon: "move_up"
+            inactiveOnColour: Colours.palette.m3secondary
+            padding: Appearance.padding.small
+            font.pointSize: Appearance.font.size.large
+            disabled: !Players.active?.canRaise
+            onClicked: {
+                Players.active?.raise();
+                root.visibilities.dashboard = false;
+            }
+        }
+
+        SplitButton {
+            id: playerSelector
+
+            disabled: !Players.list.length
+            active: menuItems.find(m => m.modelData === Players.active) ?? menuItems[0] ?? null
+            menu.onItemSelected: item => Players.manualActive = item.modelData
+
+            menuItems: playerList.instances
+            fallbackIcon: "music_off"
+            fallbackText: qsTr("No players")
+
+            label.Layout.maximumWidth: slider.implicitWidth * 0.28
+            label.elide: Text.ElideRight
+
+            stateLayer.disabled: true
+            menuOnTop: true
+
+            Variants {
+                id: playerList
+
+                model: Players.list
+
+                MenuItem {
+                    required property MprisPlayer modelData
+
+                    icon: modelData === Players.active ? "check" : ""
+                    text: Players.getIdentity(modelData)
+                    activeIcon: "animated_images"
+                }
+            }
+        }
+
+        PlayerControl {
+            type: IconButton.Text
+            icon: "delete"
+            inactiveOnColour: Colours.palette.m3error
+            padding: Appearance.padding.small
+            font.pointSize: Appearance.font.size.large
+            disabled: !Players.active?.canQuit
+            onClicked: Players.active?.quit()
         }
     }
 
@@ -201,6 +363,43 @@ Item {
             elide: Text.ElideRight
             wrapMode: Players.active ? Text.NoWrap : Text.WordWrap
         }
+
+        ListView {
+            id: lyricsView
+            Layout.fillWidth: true
+            Layout.preferredHeight: lyricsModel.count == 0 ? 0 : 200   //probably not a good idea to hard code this
+            clip: true
+            model: lyricsModel
+            currentIndex: root.currentIndex
+
+            preferredHighlightBegin: height / 2 - 30  //arbitrary
+            preferredHighlightEnd: height / 2 + 30    //arbitrary
+            highlightRangeMode: ListView.ApplyRange
+            highlightFollowsCurrentItem: true
+            highlightMoveDuration: 400                //need to use the animation scale from the config
+
+            delegate: Item {
+                id: delegateRoot
+                width: lyricsView.width
+                height: lyricText.contentHeight + 20
+                property bool isCurrent: ListView.isCurrentItem
+                Text {
+                    id: lyricText
+                    text: model.text                             //NEED TO USE THE SIZES FROM THE CONFIG
+                    width: parent.width - 40                     //FOR EVERYTHING HERE
+                    anchors.centerIn: parent
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 20
+                    color: isCurrent ? "#FFFFFF" : "#80FFFFFF"
+                    font.bold: isCurrent
+                    scale: isCurrent ? 1.1 : 1.0
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                    Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                }
+            }
+        }
+
 
         RowLayout {
             id: controls
@@ -302,65 +501,7 @@ Item {
             }
         }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignHCenter
-            spacing: Appearance.spacing.small
 
-            PlayerControl {
-                type: IconButton.Text
-                icon: "move_up"
-                inactiveOnColour: Colours.palette.m3secondary
-                padding: Appearance.padding.small
-                font.pointSize: Appearance.font.size.large
-                disabled: !Players.active?.canRaise
-                onClicked: {
-                    Players.active?.raise();
-                    root.visibilities.dashboard = false;
-                }
-            }
-
-            SplitButton {
-                id: playerSelector
-
-                disabled: !Players.list.length
-                active: menuItems.find(m => m.modelData === Players.active) ?? menuItems[0] ?? null
-                menu.onItemSelected: item => Players.manualActive = item.modelData
-
-                menuItems: playerList.instances
-                fallbackIcon: "music_off"
-                fallbackText: qsTr("No players")
-
-                label.Layout.maximumWidth: slider.implicitWidth * 0.28
-                label.elide: Text.ElideRight
-
-                stateLayer.disabled: true
-                menuOnTop: true
-
-                Variants {
-                    id: playerList
-
-                    model: Players.list
-
-                    MenuItem {
-                        required property MprisPlayer modelData
-
-                        icon: modelData === Players.active ? "check" : ""
-                        text: Players.getIdentity(modelData)
-                        activeIcon: "animated_images"
-                    }
-                }
-            }
-
-            PlayerControl {
-                type: IconButton.Text
-                icon: "delete"
-                inactiveOnColour: Colours.palette.m3error
-                padding: Appearance.padding.small
-                font.pointSize: Appearance.font.size.large
-                disabled: !Players.active?.canQuit
-                onClicked: Players.active?.quit()
-            }
-        }
     }
 
     Item {
