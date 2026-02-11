@@ -80,13 +80,14 @@ Item {
             let artist = player.metadata["xesam:artist"]
             let title  = player.metadata["xesam:title"]
 
-            if (artist instanceof Array)
-                artist = artist[0]
+            if (Array.isArray(artist)) {
+                artist = artist.join(", ")
+            }
 
-                if (!artist || !title)
-                    return ""
+            if (!artist || !title)
+                return ""
 
-                    return artist + " - " + title + ".lrc"
+            return artist + " - " + title + ".lrc"
     }
 
     property bool fileLoaded: false
