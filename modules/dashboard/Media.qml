@@ -383,6 +383,19 @@ Item {
                 width: lyricsView.width
                 height: lyricText.contentHeight + 20
                 property bool isCurrent: ListView.isCurrentItem
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (model.time !== undefined) {
+                            player.position = model.time
+                        }
+                        lyricsView.currentIndex = index
+                        lyricsView.positionViewAtIndex(index, ListView.Center)
+                    }
+                }
+
                 Text {
                     id: lyricText
                     text: model.text                             //NEED TO USE THE SIZES FROM THE CONFIG
