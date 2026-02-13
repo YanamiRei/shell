@@ -109,9 +109,51 @@ Item {
         Qt.callLater(() => {
             if (!fileLoaded) {
                 lyricsModel.clear()
+                fetchFromExternal()
             }
         })
 
+    }
+
+    function fetchFromExternal() {
+        let artist = player.metadata["xesam:artist"]
+        let title  = player.metadata["xesam:title"]
+        fetchLRCLIB(title, artist)
+    }
+
+    function fetchLRCLIB(title, artist) {
+        let url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}`
+
+        let xhr = new XMLHttpRequest()
+        xhr.open("GET", url)
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                if (xhr.status === 200) {
+                    let response = JSON.parse(xhr.responseText)
+                    if (response.syncedLyrics) {
+                        let parsed = Lrc.parseLrc(response.syncedLyrics)
+                        lyricsModel.clear()
+
+                        for (let line of parsed) {
+                            lyricsModel.append({
+                                time: line.time,
+                                text: line.text
+                            })
+                        }
+                    } else {
+                        // Fallback to Netease if LRCLIB has no synced lyrics
+                        fetchNetease(title, artist)
+                    }
+                } else {
+                    fetchNetease(title, artist)
+                }
+            }
+        }
+        xhr.send()
+    }
+
+    function fetchNetease(title, artist) {
+        console.log("not implemented yet, sorry!")
     }
 
     Connections {
